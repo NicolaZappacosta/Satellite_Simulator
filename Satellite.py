@@ -1,3 +1,13 @@
+# SATELLITE CLASS
+# This class defines the behaviour of a satellite simulating the FC-PLANT loop.
+# The plant is integrated using the RK45 solver and it is stopped each time the FC needs to be updated.
+# The loop is given as:
+#
+# Begin --> State Machine --> FC --> Actuators --> Plant --> External inputs --> Sensors -┐
+#               ┕--------------------------<----------------------------------------------┙
+
+## Imports
+
 import numpy as np
 import pandas as pd
 
@@ -8,43 +18,22 @@ import Guidance
 from Math import quatmolt
 from scipy import integrate as inte
 from matplotlib import pyplot as plt
+from EOM import EOM
 
 class Satellite(object):
 
-    def __init__(self, mass = 1000, inertia = [100.,0.,0.,0.,200.,0.,0.,0.,300.], q = [0.,0.,0.,1.], w=[0.,0.,0.], position = [7000,0,0], velocity = [0,7,0],t = 0.):
+    def __init__(self, mass = 1000, inertia = [100.,0.,0.,0.,200.,0.,0.,0.,300.], quaternion = [0.,0.,0.,1.], angular_rate=[0.,0.,0.], position = [7000,0,0], velocity = [0,7,0], time = 0.):
 
+        self.EOM = EOM(ID=0, position=np.array(position).reshape(3), velocity=np.array(velocity).reshape(3), quaternion= np.array(quaternion).reshape(4), angular_rate = np.array(angular_rate).reshape(3),time=time)
         self.alpha_0 = float(0)
         self.w_e = float(2*np.pi/86164)
         self.mass = mass
         self.inertia = np.array(inertia).reshape(3,3)
-        self.q = np.array(q).reshape(4)
-        self.w = np.array(w).reshape(3)
-        self.position = np.array(position).reshape(3)
-        self.velocity = np.array(velocity).reshape(3)
-        self.t = t
         self.fun_control    = lambda x,x_ref: np.array([0.,0.,0.])
         self.fun_reference  = lambda t,x: np.array([0.,0.,0.,1.,0.,0.,0.])
         self.fun_gravity    = lambda x: np.array([0.,0.,0.])
         self.fun_actuation  = lambda T: T
         self.actuation_flag = 'none'
-
-        history = pd.DataFrame()
-        history['t']  = [t]
-        history['q1'] = [q[0]]
-        history['q2'] = [q[1]]
-        history['q3'] = [q[2]]
-        history['q0'] = [q[3]]
-        history['w1'] = [w[0]]
-        history['w2'] = [w[1]]
-        history['w3'] = [w[2]]
-        history['x1'] = [position[0]]
-        history['x2'] = [position[1]]
-        history['x3'] = [position[2]]
-        history['v1'] = [velocity[0]]
-        history['v2'] = [velocity[1]]
-        history['v3'] = [velocity[2]]
-
-        self.history = history
 
 ## GUIDANCE PROBLEM
 
@@ -120,8 +109,8 @@ class Satellite(object):
 
     def step(self,step_time = 1.):
 
-        x_0 = np.append(np.append(self.q, self.w), np.append(self.position, self.velocity))
-        t_0 = self.t
+        x_0 = np.append(np.append(self.EOM.q_BI, self.EOM.w_BI_B), np.append(self.EOM.r_G_I, self.EOM.v_GI_I))
+        t_0 = self.EOM.t
 
         def f(t,x):
 
@@ -144,7 +133,7 @@ class Satellite(object):
 
             return np.array([dq1, dq2, dq3, dq0, dw1, dw2, dw3, dx1, dx2, dx3, dv1, dv2, dv3])
 
-        solution = inte.RK45(f, self.t, x_0, t_bound = step_time+self.t, vectorized = True, rtol = 1e-9, atol = 1e-9)
+        solution = inte.RK45(f, self.EOM.t, x_0, t_bound = step_time+self.EOM.t, vectorized = True, rtol = 1e-9, atol = 1e-9)
 
         t_values, q1_values, q2_values, q3_values, q0_values = [], [], [], [], []
         w1_values, w2_values, w3_values = [], [], []
@@ -169,50 +158,30 @@ class Satellite(object):
             v2_values.append(solution.y[11])
             v3_values.append(solution.y[12])
 
-        del t_values[0]
-        del q1_values[0]
-        del q2_values[0]
-        del q3_values[0]
-        del q0_values[0]
-        del w1_values[0]
-        del w2_values[0]
-        del w3_values[0]
-        del x1_values[0]
-        del x2_values[0]
-        del x3_values[0]
-        del v1_values[0]
-        del v2_values[0]
-        del v3_values[0]
-
         temp = pd.DataFrame()
-        temp['t']  = t_values
-        temp['q1'] = q1_values
-        temp['q2'] = q2_values
-        temp['q3'] = q3_values
-        temp['q0'] = q0_values
-        temp['w1'] = w1_values
-        temp['w2'] = w2_values
-        temp['w3'] = w3_values
-        temp['x1'] = x1_values
-        temp['x2'] = x2_values
-        temp['x3'] = x3_values
-        temp['v1'] = v1_values
-        temp['v2'] = v2_values
-        temp['v3'] = v3_values
+        temp['t']  = t_values[1:]
+        temp['q1'] = q1_values[1:]
+        temp['q2'] = q2_values[1:]
+        temp['q3'] = q3_values[1:]
+        temp['q0'] = q0_values[1:]
+        temp['w1'] = w1_values[1:]
+        temp['w2'] = w2_values[1:]
+        temp['w3'] = w3_values[1:]
+        temp['x1'] = x1_values[1:]
+        temp['x2'] = x2_values[1:]
+        temp['x3'] = x3_values[1:]
+        temp['v1'] = v1_values[1:]
+        temp['v2'] = v2_values[1:]
+        temp['v3'] = v3_values[1:]
 
-        self.q = np.array([q1_values[-1],q2_values[-1],q3_values[-1],q0_values[-1]]).reshape(4)
-        self.w = np.array([w1_values[-1],w2_values[-1],w3_values[-1]]).reshape(3)
-        self.t = t_values[-1]
-        self.position = np.array([x1_values[-1], x2_values[-1], x3_values[-1]]).reshape(3)
-        self.velocity = np.array([v1_values[-1], v2_values[-1], v3_values[-1]]).reshape(3)
-
-        self.history = pd.concat([self.history,temp])
+        self.EOM.appendHistory(temp)
 
         return solution
 
     def propagation(self,time):
 
-        x_0 = np.append(np.append(self.q,self.w),np.append(self.position,self.velocity))
+        x_0 = np.append(np.append(self.EOM.q_BI, self.EOM.w_BI_B), np.append(self.EOM.r_G_I, self.EOM.v_GI_I))
+        t_0 = self.EOM.t
 
         def f(t,x):
 
@@ -235,7 +204,7 @@ class Satellite(object):
 
             return np.array([dq1, dq2, dq3, dq0, dw1, dw2, dw3, dx1, dx2, dx3, dv1, dv2, dv3])
 
-        solution = inte.RK45(f, self.t, x_0, t_bound = time+self.t, vectorized = True, rtol = 1e-9, atol = 1e-9)
+        solution = inte.RK45(f, t_0, x_0, t_bound = time+t_0, vectorized = True, rtol = 1e-9, atol = 1e-9)
 
         t_values, q1_values, q2_values, q3_values, q0_values = [], [], [], [], []
         w1_values, w2_values, w3_values = [], [], []
@@ -321,7 +290,7 @@ class Satellite(object):
 
     def plotquaternions(self):
 
-        history = self.history
+        history = self.EOM.getHISTORY()
 
         t_values = history['t']
         q1_values = history['q1']
@@ -338,7 +307,7 @@ class Satellite(object):
 
     def plotangularrate(self):
 
-        history = self.history
+        history = self.EOM.getHISTORY()
 
         t_values = history['t']
         w1_values = history['w1']
@@ -353,7 +322,7 @@ class Satellite(object):
 
     def plotposition(self):
 
-        history = self.history
+        history = self.EOM.getHISTORY()
 
         t_values = history['t']
         x1_values = history['x1']
@@ -368,7 +337,7 @@ class Satellite(object):
 
     def plotvelocity(self):
 
-        history = self.history
+        history = self.EOM.getHISTORY()
 
         t_values = history['t']
         v1_values = history['v1']
@@ -383,7 +352,7 @@ class Satellite(object):
 
     def plotSSP(self):
 
-        history = self.history
+        history = self.EOM.getHISTORY()
 
         alpha_0 = self.alpha_0
         omega = self.w_e
@@ -416,7 +385,7 @@ class Satellite(object):
 
     def plotAttitude(self):
 
-        history = self.history
+        history = self.EOM.getHISTORY()
 
         alpha_0 = self.alpha_0
         omega = self.w_e
@@ -472,7 +441,7 @@ class Satellite(object):
 
     def plotOrbParam(self):
 
-        history = self.history
+        history = self.EOM.getHISTORY()
 
         t_values = history['t']
         v1_values = history['v1'].values
